@@ -1,0 +1,106 @@
+module slave_tb;
+parameter ADDR_WIDTH = 32;
+parameter DATA_WIDTH = 32;
+parameter MEM_DEPTH = 16;
+typedef enum bit [2:0] {Normal_op, reset_op, wait_write, error_t} test;
+test tests;
+//Global inputs
+bit PCLK, PRESETn;
+typedef enum  bit [1:0] {IDLE, SETUP, ACCESS, ERROR} state_e;
+
+//Defining port direction
+logic [ADDR_WIDTH-1:0] PADDR;
+logic PSEL, PENABLE, PWRITE;
+logic [DATA_WIDTH-1:0] PWDATA;
+logic PREADY_dut, PSLVERR_dut;
+logic [DATA_WIDTH-1:0] PRDATA_dut;
+logic PREADY_gm, PSLVERR_gm;
+logic [DATA_WIDTH-1:0] PRDATA_gm;
+logic [3:0] PSTRB;
+logic [2:0]PPROT;
+
+integer i;
+
+assign PSTRB = (!PWRITE)? 0: 4'b1111;
+assign PPROT = 0;
+
+//DUT Instantiation
+apb_slave DUT (PCLK, PRESETn, PADDR, PSEL, PENABLE, PWRITE, PWDATA, PREADY_dut, PRDATA_dut, PSLVERR_dut);
+APB_Slave  GM (PSEL, PENABLE, PWRITE, PADDR, PWDATA, PSTRB, PPROT, PCLK, PRESETn, PRDATA_gm, PREADY_gm, PSLVERR_gm);
+
+//Clock Generation
+initial begin
+    PCLK = 0;
+    forever #5 PCLK = ~ PCLK;
+end
+
+//Stimulus generation
+initial begin
+tests = reset_op;
+    reset;
+
+//normal write operation
+tests = Normal_op;
+  for(i=0; i<16; i++) begin
+    PADDR <= i;
+    PSEL <= 1;
+    PENABLE <= 0;
+    PWRITE <= 1;
+    PWDATA <= $random;
+    @(posedge PCLK);
+    PENABLE <= 1;
+    @(posedge PCLK);
+checker_task;
+    PSEL <= 0;    
+    PENABLE <= 0;
+    @(posedge PCLK);
+  end
+
+//normal read operation
+    PADDR <= 'd15;
+    PSEL <= 1;
+    PENABLE <= 0;
+    PWRITE <= 0;
+    PWDATA <= $random;
+    @(posedge PCLK);
+    PENABLE <= 1;
+    @(posedge PCLK);
+checker_task;
+    PSEL <= 0;
+    PENABLE <= 0;
+    @(posedge PCLK);
+//write with error operation
+    PADDR <= 1055;
+    PSEL <= 1;
+    PENABLE <= 0;
+    PWRITE <= 1;
+    PWDATA <= $random;
+    @(posedge PCLK);
+    PENABLE <= 1;
+    repeat(2) @(posedge PCLK);
+checker_task;
+
+$stop;
+end
+
+
+task reset;
+    PRESETn <= 0;
+    PADDR <= $random;
+    PSEL <= 0;
+    PENABLE <= 0;
+    PWRITE <= 0;
+    PWDATA <= $random;
+    @(posedge PCLK);
+    PRESETn <= 1;
+endtask 
+
+task checker_task;
+if(PREADY_dut != PREADY_gm)
+$display("at time: %0t [PREADY ERROR], PREADY_DUT = %0d, PREADY_GM = %0d", $time, PREADY_dut, PREADY_gm);
+
+if(PRDATA_dut != PRDATA_gm)
+$display("at time: %0t [PRDATA ERROR], PRDATA_DUT = %0d, PRDATA_GM = %0d", $time, PRDATA_dut, PRDATA_gm);
+endtask
+
+endmodule
